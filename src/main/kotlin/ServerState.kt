@@ -12,7 +12,6 @@ class User(val name: String) {
         if(this === other) return true
         if(other?.javaClass != javaClass) return false
         other as User
-        if(other === this) return true
         return other.name == name
     }
 
