@@ -4,6 +4,48 @@ import io.vertx.ext.web.Router
 import io.vertx.ext.web.RoutingContext
 import mu.KotlinLogging
 
+
+// Server implementation roadmap
+// POST /connect - Register session and obtain its UUID [ ]
+//  Doesn't require authorization to be used
+//  Arguments:
+//   username: String - Account username
+//   password: String - Account password
+//  Returns:
+//   success: Boolean - Shows whether authorization was successful or not
+//   uuid: String - If `success` is true, contains session UUID used for further actions
+
+// POST /disconnect/:uuid - Revoke session [ ]
+//  Requires authorization to be used
+//  Returns `success` = false if session UUID is invalid
+//  Path arguments:
+//   uuid: String - Session UUID
+//  Arguments:
+//   None
+//  Returns:
+//   success: Boolean - Shows whether revoke was successful or not
+
+// GET /me/:uuid - Get current user information [ ]
+//  Requires authorization to be used
+//  Doesn't return anything if session UUID is invalid
+//  Path arguments:
+//   uuid: String - Session UUID
+//  Arguments:
+//   None
+//  Returns:
+//   TODO: Describe `User` structure
+//   user: User - Current user
+
+// POST /me/:uuid - Update current user information [ ]
+//  Requires authorization to be used
+//  Returns `success` = false and empty `reason` if session UUID is invalid
+//  Path arguments:
+//   uuid: String - Session UUID
+//  Arguments:
+//   user: User - Updated user. Empty fields remain untouched
+//  Returns:
+//   success: Boolean - Shows whether update was successful or not
+//   reason: String - If `success` if false, contains error message
 class Server(router: Router) {
     // Object used for storing one logger for all instances of `Server`
     companion object Logging {
