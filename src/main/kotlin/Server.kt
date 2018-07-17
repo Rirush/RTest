@@ -1,9 +1,10 @@
 package rirush.rtest.server
 
+import io.vertx.core.http.HttpMethod
 import io.vertx.ext.web.Router
 import io.vertx.ext.web.RoutingContext
+import io.vertx.ext.web.handler.BodyHandler
 import mu.KotlinLogging
-
 
 // Server implementation roadmap
 // POST /connect - Register session and obtain its UUID [ ]
@@ -54,8 +55,19 @@ class Server(router: Router) {
 
     init {
         logger.info { "Registering routes" }
+        // Enable chunked response
+        router.route().handler {
+            it.response().isChunked = true
+            it.next()
+        }
         // Logging "middleware"
         router.route().handler(::log)
+        // Enable `BodyHandler` to read body
+        router.route().handler(BodyHandler.create())
+        // POST /connect method handler
+        router.route("/connect/").method(HttpMethod.POST).handler(::connect)
+        // POST /disconnect method handler
+        router.route("/disconnect/:uuid/").method(HttpMethod.POST).handler(::disconnect)
         // Stub handler that answers with a string to all requests
         // TODO: Replace stub with an actual server implementation
         router.route().handler(::stub)
@@ -67,6 +79,28 @@ class Server(router: Router) {
     private fun log(ctx: RoutingContext) {
         logger.info { "Request from ${ctx.request().remoteAddress().host()} to ${ctx.request().remoteAddress().path()}" }
         ctx.next()
+    }
+
+    private fun connect(ctx: RoutingContext) {
+        val response = ctx.response()
+        val request = ctx.request()
+        val attrs = request.formAttributes()
+
+        val username = attrs["username"]
+        val password = attrs["password"]
+        if(username == null || password == null) {
+            response.write("NOT ENOUGH ARGUMENTS").end()
+            return
+        }
+        username as String
+        password as String
+
+        response.write("OK").end()
+    }
+
+    private fun disconnect(ctx: RoutingContext) {
+        val response = ctx.response()
+        val uuid = ctx.request().getParam("uuid")
     }
 
     // Stub handler
