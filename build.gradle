@@ -14,6 +14,10 @@ dependencies {
     compile "io.vertx:vertx-core:3.5.3"
     compile "io.vertx:vertx-lang-kotlin:3.5.3"
     compile "io.vertx:vertx-web:3.5.3"
+
+    compile "org.slf4j:slf4j-api:1.7.25"
+    compile "org.slf4j:slf4j-simple:1.7.25"
+    compile "io.github.microutils:kotlin-logging:1.5.4"
 }
 
 compileKotlin {
