@@ -1,10 +1,13 @@
 package rirush.rtest.server
 
+import com.google.gson.GsonBuilder
 import io.vertx.core.http.HttpMethod
 import io.vertx.ext.web.Router
 import io.vertx.ext.web.RoutingContext
 import io.vertx.ext.web.handler.BodyHandler
 import mu.KotlinLogging
+
+data class Result(val success: Boolean, val uuid: String? = null, val user: User? = null, val reason: String? = null)
 
 // Server implementation roadmap
 // POST /connect - Register session and obtain its UUID [ ]
@@ -51,6 +54,7 @@ class Server(router: Router) {
     // Object used for storing one logger for all instances of `Server`
     companion object Logging {
         val logger = KotlinLogging.logger {}
+        val gsonBuilder = GsonBuilder()
     }
 
     init {
@@ -85,17 +89,19 @@ class Server(router: Router) {
         val response = ctx.response()
         val request = ctx.request()
         val attrs = request.formAttributes()
+        val gson = gsonBuilder.create()
 
         val username = attrs["username"]
         val password = attrs["password"]
         if(username == null || password == null) {
-            response.write("NOT ENOUGH ARGUMENTS").end()
+            response.write(gson.toJson(Result(success = false, reason = "Missing `username` or `password`"))).end()
             return
         }
         username as String
         password as String
 
-        response.write("OK").end()
+
+        response.write(gson.toJson(Result(success = true))).end()
     }
 
     private fun disconnect(ctx: RoutingContext) {
