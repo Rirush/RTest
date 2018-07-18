@@ -36,13 +36,24 @@ class Session(val user: User) {
     }
 }
 
-class SessionIdentifier private constructor(val id: UUID) {
+class SessionIdentifier constructor(val id: UUID) {
     companion object {
         // Create `SessionIdentifier` with randomly generated UUID
         fun newIdentifier(): SessionIdentifier {
             val uuid = UUID.randomUUID()
             return SessionIdentifier(uuid)
         }
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if(this === other) return true
+        if(other?.javaClass != javaClass) return false
+        other as SessionIdentifier
+        return other.id.compareTo(id) == 0
+    }
+
+    override fun hashCode(): Int {
+        return id.hashCode()
     }
 }
 

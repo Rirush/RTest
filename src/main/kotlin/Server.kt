@@ -6,6 +6,7 @@ import io.vertx.ext.web.Router
 import io.vertx.ext.web.RoutingContext
 import io.vertx.ext.web.handler.BodyHandler
 import mu.KotlinLogging
+import java.util.*
 
 data class Result(val success: Boolean, val uuid: String? = null, val user: User? = null, val reason: String? = null)
 
@@ -98,13 +99,41 @@ class Server(router: Router) {
         username as String
         password as String
 
+        // TODO: Actually check username and password
+        // But for now let's pretend that all passwords are correct
 
-        response.write(gson.toJson(Result(success = true))).end()
+        val user = User(username)
+        val id = ServerState.createSession(user)
+
+        response.write(gson.toJson(Result(success = true, uuid = id.id.toString()))).end()
     }
 
     private fun disconnect(ctx: RoutingContext) {
         val response = ctx.response()
+        val gson = gsonBuilder.create()
+
         val uuid = ctx.request().getParam("uuid")
+        if(uuid == null) {
+            response.write(gson.toJson(Result(success = false, reason = "Missing `uuid`"))).end()
+            return
+        }
+        uuid as String
+        val id: UUID
+        try {
+            id = UUID.fromString(uuid)
+        } catch(e: Exception) {
+            response.write(gson.toJson(Result(success = false, reason = "Invalid session"))).end()
+            return
+        }
+
+        try {
+            ServerState.revokeSession(SessionIdentifier(id))
+        } catch(e: NoSuchSessionException) {
+            response.write(gson.toJson(Result(success = false, reason = "Invalid session"))).end()
+            return
+        }
+
+        response.write(gson.toJson(Result(success = true))).end()
     }
 
     // 404 handler that registered after all handlers and called only if there're no other handlers for requested path
