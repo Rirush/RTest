@@ -73,8 +73,6 @@ class Server(router: Router) {
         // POST /disconnect method handler
         router.route("/disconnect/:uuid/").method(HttpMethod.POST).handler(::disconnect)
         // Stub handler that answers with a string to all requests
-        // TODO: Replace stub with an actual server implementation
-        router.route().handler(::stub)
         // 404 handler, that should be called if no handlers are associated with path
         router.route().handler(::notFound)
     }
@@ -109,19 +107,12 @@ class Server(router: Router) {
         val uuid = ctx.request().getParam("uuid")
     }
 
-    // Stub handler
-    // TODO: Remove this and implement actual server
-    private fun stub(ctx: RoutingContext) {
-        val response = ctx.response()
-        response.putHeader("Content-Type", "text/plain")
-                .end("SERVER STUB; NOT IMPLEMENTED")
-    }
-
     // 404 handler that registered after all handlers and called only if there're no other handlers for requested path
     private fun notFound(ctx: RoutingContext) {
         val response = ctx.response()
+        val gson = gsonBuilder.create()
         response.putHeader("Content-Type", "text/plain")
                 .setStatusCode(404)
-                .end("NOT FOUND")
+                .end(gson.toJson(Result(success = false, reason = "No such method found")))
     }
 }
