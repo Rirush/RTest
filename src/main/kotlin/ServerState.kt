@@ -80,6 +80,14 @@ object ServerState {
         return id
     }
 
+    fun updateSession(id: SessionIdentifier, user: User) {
+        val session = Session(user)
+        if(!sessions.contains(id)) {
+            throw NoSuchSessionException("Session with ID '${id.id}' doesn't exist")
+        }
+        sessions[id] = session
+    }
+
     // Return `Session` from `sessions` `HashMap` if session with specified `SessionIdentifier` exists, or null
     fun findSession(id: SessionIdentifier): Session? {
         return sessions[id]
