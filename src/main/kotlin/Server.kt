@@ -7,12 +7,12 @@ import io.vertx.ext.web.Router
 import io.vertx.ext.web.RoutingContext
 import io.vertx.ext.web.handler.BodyHandler
 import io.vertx.kotlin.core.json.array
+import io.vertx.kotlin.core.json.get
 import io.vertx.kotlin.core.json.json
 import io.vertx.rxjava.ext.asyncsql.AsyncSQLClient
 import mu.KotlinLogging
 import org.mindrot.jbcrypt.BCrypt
 import java.util.*
-import kotlin.system.measureNanoTime
 import kotlin.system.measureTimeMillis
 
 data class Result(val success: Boolean, val uuid: String? = null, val user: User? = null, val reason: String? = null)
@@ -147,11 +147,18 @@ class Server(router: Router, private val database: AsyncSQLClient) {
     private fun connect(ctx: RoutingContext) {
         val response = ctx.response()
         val request = ctx.request()
-        val attrs = request.formAttributes()
         val gson = gsonBuilder.create()
 
-        val username = attrs["username"]
-        val password = attrs["password"]
+        val body: JsonObject
+        try {
+            body = ctx.bodyAsJson
+        } catch(e: Exception) {
+            response.write(gson.toJson(Result(success = false, reason = "Body should be valid JSON"))).end()
+            return
+        }
+
+        val username = body.getString("username")
+        val password = body.getString("password")
         if(username == null || password == null) {
             response.write(gson.toJson(Result(success = false, reason = "Missing `username` or `password`"))).end()
             return
