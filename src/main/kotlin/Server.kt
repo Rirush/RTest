@@ -14,7 +14,7 @@ import org.mindrot.jbcrypt.BCrypt
 import java.util.*
 import kotlin.system.measureTimeMillis
 
-data class Result(val success: Boolean, val uuid: String? = null, val user: User? = null, val reason: String? = null)
+data class Result(val success: Boolean, val uuid: String? = null, val user: User? = null, val reason: String? = null, val users: Array<User>? = null)
 
 // Server implementation roadmap
 // POST /connect - Register session and obtain its UUID [x]
@@ -72,7 +72,7 @@ data class Result(val success: Boolean, val uuid: String? = null, val user: User
 //  Arguments:
 //   onlyStudents: Boolean - Return only students
 //   grade: String - Filter students by grade.
-//    "11" will return all students from eleventh grade; "11A" will return all students from "11A" class
+//    "11_" will return all students from eleventh grade; "11A" will return all students from "11A" class
 //   onlyTeachers: Boolean - Return only teachers
 // TODO: Add permission table and filter teachers by permissions on specific item (e.g. test or asset)
 //  Returns:
@@ -132,6 +132,8 @@ class Server(router: Router, private val database: AsyncSQLClient) {
         router.route("/me/:uuid/").method(HttpMethod.GET).handler(::getMe)
         // POST /me method handler
         router.route("/me/:uuid/").method(HttpMethod.POST).handler(::postMe)
+        // GET /users method handler
+        router.route("/users/:uuid/").method(HttpMethod.GET).handler(::getUsers)
         // Stub handler that answers with a string to all requests
         // 404 handler, that should be called if no handlers are associated with path
         router.route().handler(::notFound)
@@ -154,6 +156,7 @@ class Server(router: Router, private val database: AsyncSQLClient) {
         }
     }
 
+    // POST /connect method implementation
     private fun connect(ctx: RoutingContext) {
         val response = ctx.response()
         val request = ctx.request()
@@ -213,6 +216,7 @@ class Server(router: Router, private val database: AsyncSQLClient) {
         }
     }
 
+    // POST /disconnect method implementation
     private fun disconnect(ctx: RoutingContext) {
         val response = ctx.response()
         val gson = gsonBuilder.create()
@@ -243,6 +247,7 @@ class Server(router: Router, private val database: AsyncSQLClient) {
         response.write(gson.toJson(Result(success = true))).end()
     }
 
+    // GET /me method implementation
     private fun getMe(ctx: RoutingContext) {
         val response = ctx.response()
         val gson = gsonBuilder.create()
@@ -274,7 +279,11 @@ class Server(router: Router, private val database: AsyncSQLClient) {
             val resultSet = result.result()
             if(resultSet.numRows == 0) {
                 response.write(gson.toJson(Result(success = false, reason = "User bound to this session was removed, this session will be revoked"))).end()
-                ServerState.revokeSession(SessionIdentifier(UUID.fromString(uuid)))
+                try {
+                    ServerState.revokeSession(SessionIdentifier(UUID.fromString(uuid)))
+                } catch(e: Exception) {
+                    // In case of exception, do nothing.
+                }
                 return@queryWithParams
             }
 
@@ -290,6 +299,7 @@ class Server(router: Router, private val database: AsyncSQLClient) {
         }
     }
 
+    // POST /me method implementation
     private fun postMe(ctx: RoutingContext) {
         val response = ctx.response()
         val gson = gsonBuilder.create()
@@ -310,7 +320,7 @@ class Server(router: Router, private val database: AsyncSQLClient) {
         try {
             body = ctx.bodyAsJson
         } catch(e: Exception) {
-            response.write(gson.toJson(Result(success = false, reason = "Invalid body"))).end()
+            response.write(gson.toJson(Result(success = false, reason = "Body should be valid JSON"))).end()
             return
         }
 
@@ -327,7 +337,11 @@ class Server(router: Router, private val database: AsyncSQLClient) {
             val resultSet = result.result()
             if(resultSet.numRows == 0) {
                 response.write(gson.toJson(Result(success = false, reason = "User bound to this session was removed, this session will be revoked"))).end()
-                ServerState.revokeSession(SessionIdentifier(UUID.fromString(uuid)))
+                try {
+                    ServerState.revokeSession(SessionIdentifier(UUID.fromString(uuid)))
+                } catch(e: Exception) {
+                    // In case of exception, do nothing.
+                }
                 return@queryWithParams
             }
 
@@ -358,6 +372,153 @@ class Server(router: Router, private val database: AsyncSQLClient) {
                     return@updateWithParams
                 }
                 response.write(gson.toJson(Result(success = true))).end()
+            }
+        }
+    }
+
+    // GET /users method implementation
+    private fun getUsers(ctx: RoutingContext) {
+        val response = ctx.response()
+        val gson = gsonBuilder.create()
+
+        val uuid = ctx.request().getParam("uuid")
+        if(uuid == null) {
+            response.write(gson.toJson(Result(success = false, reason = "Missing `uuid`"))).end()
+            return
+        }
+        val session = checkSession(uuid)
+        if(session == null) {
+            response.write(gson.toJson(Result(success = false, reason = "Invalid session"))).end()
+            return
+        }
+
+        database.queryWithParams("SELECT Student FROM Users WHERE ID = ? LIMIT 1", json {
+            array(session.user.id.toString())
+        }) { result ->
+            if(!result.succeeded()) {
+                val cause = result.cause()
+                logger.error { cause.localizedMessage }
+                response.write(gson.toJson(Result(success = false, reason = "Internal server error"))).end()
+                return@queryWithParams
+            }
+
+            val resultSet = result.result()
+            if(resultSet.numRows == 0) {
+                response.write(gson.toJson(Result(success = false, reason = "User bound to this session was removed, session will be revoked"))).end()
+                try {
+                    ServerState.revokeSession(SessionIdentifier(UUID.fromString(uuid)))
+                } catch(e: Exception) {
+                    // In case of exception, do nothing.
+                }
+                return@queryWithParams
+            }
+            val row = resultSet.rows[0]
+            val student = row.getBoolean("student", true)
+            if(student) {
+                response.write(gson.toJson(Result(success = false, reason = "Students are not allowed to use this method"))).end()
+                return@queryWithParams
+            }
+
+            val onlyStudents = ctx.queryParam("onlyStudents")[0]?.toBoolean()
+            val grade = ctx.queryParam("query")[0]
+            val onlyTeachers = ctx.queryParam("onlyTeachers")[0]?.toBoolean()
+            // FIXME: Unreachable code, stuck on getting query parameters
+            logger.info { "${onlyStudents} ${grade} ${onlyTeachers}" }
+            if(onlyStudents != null && onlyTeachers != null) {
+                response.write(gson.toJson(Result(success = false, reason = "Both `onlyStudents` and `onlyTeachers` met"))).end()
+                return@queryWithParams
+            }
+            when {
+                onlyStudents ?: false && grade != null -> {
+                    database.queryWithParams("SELECT ID, FirstName, LastName, Username FROM Users WHERE (SELECT Grade FROM StudentInfo WHERE StudentInfo.ID = Users.ID) LIKE ? AND Student = true", json {
+                        array(grade)
+                    }) query@{ res ->
+                        if(!res.succeeded()) {
+                            val cause = res.cause()
+                            logger.error { cause.localizedMessage }
+                            response.write(gson.toJson(Result(success = false, reason = "Internal server error"))).end()
+                            return@query
+                        }
+                        val studentsResultSet = res.result()
+                        val list = mutableListOf<User>()
+                        for(studentRow in studentsResultSet.rows) {
+                            list.add(User(
+                                    id = UUID.fromString(studentRow.getString("id")),
+                                    firstName = studentRow.getString("firstname"),
+                                    lastName = studentRow.getString("lastname"),
+                                    username = studentRow.getString("username"),
+                                    student = true
+                            ))
+                        }
+                        response.write(gson.toJson(Result(success = true, users = list.toTypedArray()))).end()
+                    }
+                }
+                onlyStudents ?: false -> {
+                    database.query("SELECT ID, FirstName, LastName, Username FROM Users WHERE Student = true") { res ->
+                        if(!res.succeeded()) {
+                            val cause = res.cause()
+                            logger.error { cause.localizedMessage }
+                            response.write(gson.toJson(Result(success = false, reason = "Internal server error"))).end()
+                            return@query
+                        }
+                        val studentsResultSet = res.result()
+                        val list = mutableListOf<User>()
+                        for(studentRow in studentsResultSet.rows) {
+                            list.add(User(
+                                    id = UUID.fromString(studentRow.getString("id")),
+                                    firstName = studentRow.getString("firstname"),
+                                    lastName = studentRow.getString("lastname"),
+                                    username = studentRow.getString("username"),
+                                    student = true
+                            ))
+                        }
+                        response.write(gson.toJson(Result(success = true, users = list.toTypedArray()))).end()
+                    }
+                }
+                onlyTeachers ?: false -> {
+                    database.query("SELECT ID, FirstName, LastName, Username FROM Users WHERE Student = false") { res ->
+                        if(!res.succeeded()) {
+                            val cause = res.cause()
+                            logger.error { cause.localizedMessage }
+                            response.write(gson.toJson(Result(success = false, reason = "Internal server error"))).end()
+                            return@query
+                        }
+                        val teacherResultSet = res.result()
+                        val list = mutableListOf<User>()
+                        for(teacherRow in teacherResultSet.rows) {
+                            list.add(User(
+                                    id = UUID.fromString(teacherRow.getString("id")),
+                                    firstName = teacherRow.getString("firstname"),
+                                    lastName = teacherRow.getString("lastname"),
+                                    username = teacherRow.getString("username"),
+                                    student = false
+                            ))
+                        }
+                        response.write(gson.toJson(Result(success = true, users = list.toTypedArray()))).end()
+                    }
+                }
+                else -> {
+                    database.query("SELECT ID, FirstName, LastName, Username, Student FROM Users") { res ->
+                        if(!res.succeeded()) {
+                            val cause = res.cause()
+                            logger.error { cause.localizedMessage }
+                            response.write(gson.toJson(Result(success = false, reason = "Internal server error"))).end()
+                            return@query
+                        }
+                        val mixedResultSet = res.result()
+                        val list = mutableListOf<User>()
+                        for(mixedRow in mixedResultSet.rows) {
+                            list.add(User(
+                                    id = UUID.fromString(mixedRow.getString("id")),
+                                    firstName = mixedRow.getString("firstname"),
+                                    lastName = mixedRow.getString("lastname"),
+                                    username = mixedRow.getString("username"),
+                                    student = mixedRow.getBoolean("student")
+                            ))
+                        }
+                        response.write(gson.toJson(Result(success = true, users = list.toTypedArray()))).end()
+                    }
+                }
             }
         }
     }
