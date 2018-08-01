@@ -46,24 +46,66 @@ data class Result(val success: Boolean, val uuid: String? = null, val user: User
 
 // GET /me/:uuid - Get current user information [x]
 //  Requires authorization to be used
-//  Doesn't return anything if session UUID is invalid
 //  Path arguments:
 //   uuid: String - Session UUID
 //  Arguments:
 //   None
 //  Returns:
+//   success: Boolean - Shows whether request was successful or not
+//   reason: String - If request was unsuccessful, shows why
 //   user: User - Current user
 
 // POST /me/:uuid - Update current user information [x]
 //  Requires authorization to be used
-//  Returns `success` = false and empty `reason` if session UUID is invalid
 //  Path arguments:
 //   uuid: String - Session UUID
 //  Arguments:
-//   user: User - Updated user. Empty or omitted fields remain untouched. `id` and `student` fields are always ignored
+//   body - User - Updated user. Omitted fields remain untouched. `id` and `student` fields are always ignored
 //  Returns:
 //   success: Boolean - Shows whether update was successful or not
 //   reason: String - If `success` if false, contains error message
+
+// GET /users/:uuid - Get all users that match filters [ ]
+//  Requires authorization to be used
+//  Requires user to be teacher (`student` = false)
+//  Path arguments:
+//   uuid: String - Session UUID
+//  Arguments:
+//   onlyStudents: Boolean - Return only students
+//   grade: String - Filter students by grade.
+//    "11" will return all students from eleventh grade; "11A" will return all students from "11A" class
+//   onlyTeachers: Boolean - Return only teachers
+// TODO: Add permission table and filter teachers by permissions on specific item (e.g. test or asset)
+//  Returns:
+//   success: Boolean - Shows whether request was successful or not
+//   reason: String - If request was unsuccessful, shows why
+//   users: Array<User> - Users that match filters
+
+// POST /user/:uuid - Create or update user [ ]
+//  Requires authorization to be used
+//  Requires user to be teacher (`student` = false)
+//  Path arguments:
+//   uuid: String - Session UUID
+//  Arguments:
+//   id: String - UUID of existing user to update. Omit this field to create new user
+//   user: User - User information. All fields should be present if new user is being created
+//    When updating, omitted fields remain unchanged
+//  Returns:
+//   success: Boolean - Shows whether update/creation was successful or not
+//   reason: String - If update/creation was unsuccessful, shows why
+//   uuid: String - When creating a new user, contains UUID of created user
+
+// GET /user/:uuid - Get user [ ]
+//  Requires authorization to be used
+//  Requires user to be teacher (`student` = false)
+//  Path arguments:
+//   uuid: String - Session UUID
+//  Arguments:
+//   id: String - UUID of requested user
+//  Returns:
+//   success: Boolean - Shows whether request was successful or not
+//   reason: String - If request was unsuccessful, shows why
+//   user: User - Requested user
 class Server(router: Router, private val database: AsyncSQLClient) {
     // Object used for storing one logger for all instances of `Server`
     companion object Logging {
