@@ -36,7 +36,14 @@ data class Result(val success: Boolean, val uuid: String? = null, val user: User
 //  Returns:
 //   success: Boolean - Shows whether revoke was successful or not
 
-// GET /me/:uuid - Get current user information [ ]
+// User type structure:
+//  id: String - User's UUID
+//  username: String - User's username
+//  firstName: String - User's first name
+//  lastName: String - User's last name
+//  student: Boolean - Shows whether user is a teacher or a student
+
+// GET /me/:uuid - Get current user information [x]
 //  Requires authorization to be used
 //  Doesn't return anything if session UUID is invalid
 //  Path arguments:
@@ -44,7 +51,6 @@ data class Result(val success: Boolean, val uuid: String? = null, val user: User
 //  Arguments:
 //   None
 //  Returns:
-//   TODO: Describe `User` structure
 //   user: User - Current user
 
 // POST /me/:uuid - Update current user information [ ]
