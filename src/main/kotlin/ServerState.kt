@@ -5,18 +5,18 @@ import java.util.*
 class SessionExistsException(override var message: String) : Exception(message)
 class NoSuchSessionException(override var message: String) : Exception(message)
 
-class User(val name: String) {
+class User(val id: UUID = UUID.randomUUID(), val username: String) {
     // Compare users not by hash of object, but by its fields
     // Required by `findUsers` to function properly
     override fun equals(other: Any?): Boolean {
         if(this === other) return true
         if(other?.javaClass != javaClass) return false
         other as User
-        return other.name == name
+        return other.username == username
     }
 
     override fun hashCode(): Int {
-        return name.hashCode()
+        return username.hashCode()
     }
 }
 

@@ -5,13 +5,17 @@ import io.vertx.core.http.HttpMethod
 import io.vertx.ext.web.Router
 import io.vertx.ext.web.RoutingContext
 import io.vertx.ext.web.handler.BodyHandler
+import io.vertx.kotlin.core.json.array
+import io.vertx.kotlin.core.json.json
+import io.vertx.rxjava.ext.asyncsql.AsyncSQLClient
 import mu.KotlinLogging
+import org.mindrot.jbcrypt.BCrypt
 import java.util.*
 
 data class Result(val success: Boolean, val uuid: String? = null, val user: User? = null, val reason: String? = null)
 
 // Server implementation roadmap
-// POST /connect - Register session and obtain its UUID [ ]
+// POST /connect - Register session and obtain its UUID [x]
 //  Doesn't require authorization to be used
 //  Arguments:
 //   username: String - Account username
@@ -20,7 +24,7 @@ data class Result(val success: Boolean, val uuid: String? = null, val user: User
 //   success: Boolean - Shows whether authorization was successful or not
 //   uuid: String - If `success` is true, contains session UUID used for further actions
 
-// POST /disconnect/:uuid - Revoke session [ ]
+// POST /disconnect/:uuid - Revoke session [x]
 //  Requires authorization to be used
 //  Returns `success` = false if session UUID is invalid
 //  Path arguments:
@@ -51,7 +55,7 @@ data class Result(val success: Boolean, val uuid: String? = null, val user: User
 //  Returns:
 //   success: Boolean - Shows whether update was successful or not
 //   reason: String - If `success` if false, contains error message
-class Server(router: Router) {
+class Server(val router: Router, val database: AsyncSQLClient) {
     // Object used for storing one logger for all instances of `Server`
     companion object Logging {
         val logger = KotlinLogging.logger {}
@@ -99,13 +103,40 @@ class Server(router: Router) {
         username as String
         password as String
 
-        // TODO: Actually check username and password
-        // But for now let's pretend that all passwords are correct
+        // Query user's ID and password from database
+        database.queryWithParams("SELECT ID, Password FROM Users WHERE Username = ? LIMIT 1", json {
+            array(username)
+        }) { result ->
+            if(result.succeeded()) {
+                val resultSet = result.result()
+                if(resultSet.numRows == 0) {
+                    response.write(gson.toJson(Result(success = false, reason = "No such user found"))).end()
+                    return@queryWithParams
+                }
 
-        val user = User(username)
-        val id = ServerState.createSession(user)
+                // There's no point in iterating through the rows since `Username` is unique and `LIMIT 1` is applied (just to be sure)
+                val row = resultSet.rows[0]
+                val userID = row.getString("id")
+                val userPassword = row.getString("password")
 
-        response.write(gson.toJson(Result(success = true, uuid = id.id.toString()))).end()
+                // Passwords in database should be hashed using bcrypt
+                if(!BCrypt.checkpw(password, userPassword)) {
+                    response.write(gson.toJson(Result(success = false, reason = "Incorrect password"))).end()
+                    return@queryWithParams
+                }
+
+                // At this point, specified password is correct, so we store it in a session and return its ID to user
+                val user = User(id = UUID.fromString(userID), username = username)
+                val session = ServerState.createSession(user)
+
+                response.write(gson.toJson(Result(success = true, uuid = session.id.toString()))).end()
+            } else {
+                // Write error to log
+                val cause = result.cause()
+                logger.error { cause.localizedMessage }
+                response.write(gson.toJson(Result(success = false, reason = "No such user found"))).end()
+            }
+        }
     }
 
     private fun disconnect(ctx: RoutingContext) {
