@@ -11,6 +11,8 @@ import io.vertx.rxjava.ext.asyncsql.AsyncSQLClient
 import mu.KotlinLogging
 import org.mindrot.jbcrypt.BCrypt
 import java.util.*
+import kotlin.system.measureNanoTime
+import kotlin.system.measureTimeMillis
 
 data class Result(val success: Boolean, val uuid: String? = null, val user: User? = null, val reason: String? = null)
 
@@ -55,7 +57,7 @@ data class Result(val success: Boolean, val uuid: String? = null, val user: User
 //  Returns:
 //   success: Boolean - Shows whether update was successful or not
 //   reason: String - If `success` if false, contains error message
-class Server(val router: Router, val database: AsyncSQLClient) {
+class Server(router: Router, private val database: AsyncSQLClient) {
     // Object used for storing one logger for all instances of `Server`
     companion object Logging {
         val logger = KotlinLogging.logger {}
@@ -77,6 +79,8 @@ class Server(val router: Router, val database: AsyncSQLClient) {
         router.route("/connect/").method(HttpMethod.POST).handler(::connect)
         // POST /disconnect method handler
         router.route("/disconnect/:uuid/").method(HttpMethod.POST).handler(::disconnect)
+        // GET /me method handler
+        router.route("/me/:uuid/").method(HttpMethod.GET).handler(::getMe)
         // Stub handler that answers with a string to all requests
         // 404 handler, that should be called if no handlers are associated with path
         router.route().handler(::notFound)
@@ -84,8 +88,8 @@ class Server(val router: Router, val database: AsyncSQLClient) {
 
     // Logging "middleware" that called before all handlers
     private fun log(ctx: RoutingContext) {
-        logger.info { "Request from ${ctx.request().remoteAddress().host()} to ${ctx.request().remoteAddress().path()}" }
-        ctx.next()
+        val elapsedTime = measureTimeMillis { ctx.next() }
+        logger.info { "${ctx.request().remoteAddress()} -> ${ctx.request().method()} ${ctx.request().path()} @ ${elapsedTime}ms" }
     }
 
     private fun connect(ctx: RoutingContext) {
@@ -134,7 +138,7 @@ class Server(val router: Router, val database: AsyncSQLClient) {
                 // Write error to log
                 val cause = result.cause()
                 logger.error { cause.localizedMessage }
-                response.write(gson.toJson(Result(success = false, reason = "No such user found"))).end()
+                response.write(gson.toJson(Result(success = false, reason = "Internal server error"))).end()
             }
         }
     }
@@ -143,6 +147,7 @@ class Server(val router: Router, val database: AsyncSQLClient) {
         val response = ctx.response()
         val gson = gsonBuilder.create()
 
+        // Check if UUID is valid and cast it into `UUID` class
         val uuid = ctx.request().getParam("uuid")
         if(uuid == null) {
             response.write(gson.toJson(Result(success = false, reason = "Missing `uuid`"))).end()
@@ -157,6 +162,7 @@ class Server(val router: Router, val database: AsyncSQLClient) {
             return
         }
 
+        // Revoke session
         try {
             ServerState.revokeSession(SessionIdentifier(id))
         } catch(e: NoSuchSessionException) {
@@ -165,6 +171,61 @@ class Server(val router: Router, val database: AsyncSQLClient) {
         }
 
         response.write(gson.toJson(Result(success = true))).end()
+    }
+
+    private fun getMe(ctx: RoutingContext) {
+        val response = ctx.response()
+        val gson = gsonBuilder.create()
+
+        // Check if UUID is valid and cast it into `UUID` class
+        val uuid = ctx.request().getParam("uuid")
+        if(uuid == null) {
+            response.write(gson.toJson(Result(success = false, reason = "Missing `uuid`"))).end()
+            return
+        }
+        uuid as String
+        val id: UUID
+        try {
+            id = UUID.fromString(uuid)
+        } catch(e: Exception) {
+            response.write(gson.toJson(Result(success = false, reason = "Invalid session"))).end()
+            return
+        }
+
+        // Get session
+        val session = ServerState.findSession(SessionIdentifier(id))
+        if(session == null) {
+            response.write(gson.toJson(Result(success = false, reason = "Invalid session"))).end()
+            return
+        }
+
+        // Query all user information (Session.User may contain incomplete data)
+        database.queryWithParams("SELECT Username, FirstName, LastName, Student FROM Users WHERE ID = ? LIMIT 1", json {
+            array(session.user.id.toString())
+        }) { result ->
+            if(result.succeeded()) {
+                val resultSet = result.result()
+                if(resultSet.numRows == 0) {
+                    response.write(gson.toJson(Result(success = false, reason = "User bound to this session was removed, this session will be revoked"))).end()
+                    ServerState.revokeSession(SessionIdentifier(id))
+                    return@queryWithParams
+                }
+
+                val row = resultSet.rows[0]
+                val username = row.getString("username")
+                val firstName = row.getString("firstname")
+                val lastName = row.getString("lastname")
+                val student = row.getBoolean("student")
+
+                val user = User(id = session.user.id, firstName = firstName, lastName = lastName, username = username, student = student)
+
+                response.write(gson.toJson(Result(success = true, user = user))).end()
+            } else {
+                val cause = result.cause()
+                logger.error { cause.localizedMessage }
+                response.write(gson.toJson(Result(success = false, reason = "Internal server error"))).end()
+            }
+        }
     }
 
     // 404 handler that registered after all handlers and called only if there're no other handlers for requested path
