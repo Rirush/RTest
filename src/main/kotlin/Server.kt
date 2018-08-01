@@ -7,7 +7,6 @@ import io.vertx.ext.web.Router
 import io.vertx.ext.web.RoutingContext
 import io.vertx.ext.web.handler.BodyHandler
 import io.vertx.kotlin.core.json.array
-import io.vertx.kotlin.core.json.get
 import io.vertx.kotlin.core.json.json
 import io.vertx.rxjava.ext.asyncsql.AsyncSQLClient
 import mu.KotlinLogging
@@ -144,6 +143,17 @@ class Server(router: Router, private val database: AsyncSQLClient) {
         logger.info { "${ctx.request().remoteAddress()} -> ${ctx.request().method()} ${ctx.request().path()} @ ${elapsedTime}ms" }
     }
 
+    // Function that will convert `id` to UUID and find corresponding session
+    // If `id` has incorrect format or session with this ID doesn't exist, `null` will be returned
+    private fun checkSession(id: String): Session? {
+        return try {
+            val uuid = UUID.fromString(id)
+            ServerState.findSession(SessionIdentifier(uuid))
+        } catch(e: Exception) {
+            null
+        }
+    }
+
     private fun connect(ctx: RoutingContext) {
         val response = ctx.response()
         val request = ctx.request()
@@ -244,16 +254,7 @@ class Server(router: Router, private val database: AsyncSQLClient) {
             return
         }
         uuid as String
-        val id: UUID
-        try {
-            id = UUID.fromString(uuid)
-        } catch(e: Exception) {
-            response.write(gson.toJson(Result(success = false, reason = "Invalid session"))).end()
-            return
-        }
-
-        // Get session
-        val session = ServerState.findSession(SessionIdentifier(id))
+        val session = checkSession(uuid)
         if(session == null) {
             response.write(gson.toJson(Result(success = false, reason = "Invalid session"))).end()
             return
@@ -272,10 +273,10 @@ class Server(router: Router, private val database: AsyncSQLClient) {
 
             val resultSet = result.result()
             if(resultSet.numRows == 0) {
-                    response.write(gson.toJson(Result(success = false, reason = "User bound to this session was removed, this session will be revoked"))).end()
-                    ServerState.revokeSession(SessionIdentifier(id))
-                    return@queryWithParams
-                }
+                response.write(gson.toJson(Result(success = false, reason = "User bound to this session was removed, this session will be revoked"))).end()
+                ServerState.revokeSession(SessionIdentifier(UUID.fromString(uuid)))
+                return@queryWithParams
+            }
 
             val row = resultSet.rows[0]
             val username = row.getString("username")
@@ -299,17 +300,7 @@ class Server(router: Router, private val database: AsyncSQLClient) {
             response.write(gson.toJson(Result(success = false, reason = "Missing `uuid`"))).end()
             return
         }
-        uuid as String
-        val id: UUID
-        try {
-            id = UUID.fromString(uuid)
-        } catch(e: Exception) {
-            response.write(gson.toJson(Result(success = false, reason = "Invalid session"))).end()
-            return
-        }
-
-        // Get session
-        val session = ServerState.findSession(SessionIdentifier(id))
+        val session = checkSession(uuid)
         if(session == null) {
             response.write(gson.toJson(Result(success = false, reason = "Invalid session"))).end()
             return
@@ -336,7 +327,7 @@ class Server(router: Router, private val database: AsyncSQLClient) {
             val resultSet = result.result()
             if(resultSet.numRows == 0) {
                 response.write(gson.toJson(Result(success = false, reason = "User bound to this session was removed, this session will be revoked"))).end()
-                ServerState.revokeSession(SessionIdentifier(id))
+                ServerState.revokeSession(SessionIdentifier(UUID.fromString(uuid)))
                 return@queryWithParams
             }
 
@@ -351,7 +342,7 @@ class Server(router: Router, private val database: AsyncSQLClient) {
                         student = student)
 
             try {
-                ServerState.updateSession(SessionIdentifier(id), user)
+                ServerState.updateSession(SessionIdentifier(UUID.fromString(uuid)), user)
             } catch(e: Exception) {
                 response.write(gson.toJson(Result(success = false, reason = "Session was revoked while this request was processed")))
                 return@queryWithParams
