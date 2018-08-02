@@ -419,12 +419,10 @@ class Server(router: Router, private val database: AsyncSQLClient) {
                 return@queryWithParams
             }
 
-            val onlyStudents = ctx.queryParam("onlyStudents")[0]?.toBoolean()
-            val grade = ctx.queryParam("query")[0]
-            val onlyTeachers = ctx.queryParam("onlyTeachers")[0]?.toBoolean()
-            // FIXME: Unreachable code, stuck on getting query parameters
-            logger.info { "${onlyStudents} ${grade} ${onlyTeachers}" }
-            if(onlyStudents != null && onlyTeachers != null) {
+            val onlyStudents = ctx.queryParam("onlyStudents").getOrNull(0)?.toBoolean()
+            val grade = ctx.queryParam("grade").getOrNull(0)
+            val onlyTeachers = ctx.queryParam("onlyTeachers").getOrNull(0)?.toBoolean()
+            if(onlyStudents == true && onlyTeachers == true) {
                 response.write(gson.toJson(Result(success = false, reason = "Both `onlyStudents` and `onlyTeachers` met"))).end()
                 return@queryWithParams
             }
