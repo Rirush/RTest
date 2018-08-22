@@ -5,7 +5,7 @@ import java.util.*
 class SessionExistsException(override var message: String) : Exception(message)
 class NoSuchSessionException(override var message: String) : Exception(message)
 
-class User(val id: UUID = UUID.randomUUID(), val username: String, var firstName: String? = null, var lastName: String? = null, var student: Boolean? = null) {
+class User(var id: UUID = UUID.randomUUID(), var username: String, var password: String? = null, var firstName: String? = null, var lastName: String? = null, var student: Boolean? = null) {
     // Compare users not by hash of object, but by its fields
     // Required by `findUsers` to function properly
     override fun equals(other: Any?): Boolean {
@@ -18,6 +18,10 @@ class User(val id: UUID = UUID.randomUUID(), val username: String, var firstName
     override fun hashCode(): Int {
         return username.hashCode()
     }
+
+    // GSON manages to nullify `username` field which "can't be null" so we have to compare it here
+    fun hasNulls(): Boolean = (password == null || firstName == null || lastName == null || student == null || username == null)
+
 }
 
 class Session(val user: User) {

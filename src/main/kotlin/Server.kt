@@ -42,6 +42,7 @@ data class Result(val success: Boolean, val uuid: String? = null, val user: User
 //  firstName: String - User's first name
 //  lastName: String - User's last name
 //  student: Boolean - Shows whether user is a teacher or a student
+//  password: String - (update/create only) Plain-text password
 
 // GET /me/:uuid - Get current user information [x]
 //  Requires authorization to be used
@@ -64,7 +65,7 @@ data class Result(val success: Boolean, val uuid: String? = null, val user: User
 //   success: Boolean - Shows whether update was successful or not
 //   reason: String - If `success` if false, contains error message
 
-// GET /users/:uuid - Get all users that match filters [ ]
+// GET /users/:uuid - Get all users that match filters [x]
 //  Requires authorization to be used
 //  Requires user to be teacher (`student` = false)
 //  Path arguments:
@@ -80,7 +81,7 @@ data class Result(val success: Boolean, val uuid: String? = null, val user: User
 //   reason: String - If request was unsuccessful, shows why
 //   users: Array<User> - Users that match filters
 
-// POST /user/:uuid - Create or update user [ ]
+// POST /user/:uuid - Create or update user [x]
 //  Requires authorization to be used
 //  Requires user to be teacher (`student` = false)
 //  Path arguments:
@@ -134,6 +135,8 @@ class Server(router: Router, private val database: AsyncSQLClient) {
         router.route("/me/:uuid/").method(HttpMethod.POST).handler(::postMe)
         // GET /users method handler
         router.route("/users/:uuid/").method(HttpMethod.GET).handler(::getUsers)
+        // POST /user method handler
+        router.route("/user/:uuid/").method(HttpMethod.POST).handler(::postUser)
         // Stub handler that answers with a string to all requests
         // 404 handler, that should be called if no handlers are associated with path
         router.route().handler(::notFound)
@@ -159,7 +162,6 @@ class Server(router: Router, private val database: AsyncSQLClient) {
     // POST /connect method implementation
     private fun connect(ctx: RoutingContext) {
         val response = ctx.response()
-        val request = ctx.request()
         val gson = gsonBuilder.create()
 
         val body: JsonObject
@@ -182,16 +184,16 @@ class Server(router: Router, private val database: AsyncSQLClient) {
         // Query user's ID and password from database
         database.queryWithParams("SELECT ID, Password FROM Users WHERE Username = ? LIMIT 1", json {
             array(username)
-        }) { result ->
-            if(!result.succeeded()) {
+        }) {
+            if(!it.succeeded()) {
                 // Write error to log
-                val cause = result.cause()
+                val cause = it.cause()
                 logger.error { cause.localizedMessage }
                 response.write(gson.toJson(Result(success = false, reason = "Internal server error"))).end()
                 return@queryWithParams
             }
 
-            val resultSet = result.result()
+            val resultSet = it.result()
             if(resultSet.numRows == 0) {
                     response.write(gson.toJson(Result(success = false, reason = "No such user found"))).end()
                     return@queryWithParams
@@ -268,15 +270,15 @@ class Server(router: Router, private val database: AsyncSQLClient) {
         // Query all user information (Session.User may contain incomplete data)
         database.queryWithParams("SELECT Username, FirstName, LastName, Student FROM Users WHERE ID = ? LIMIT 1", json {
             array(session.user.id.toString())
-        }) { result ->
-            if(!result.succeeded()) {
-                val cause = result.cause()
+        }) {
+            if(!it.succeeded()) {
+                val cause = it.cause()
                 logger.error { cause.localizedMessage }
                 response.write(gson.toJson(Result(success = false, reason = "Internal server error"))).end()
                 return@queryWithParams
             }
 
-            val resultSet = result.result()
+            val resultSet = it.result()
             if(resultSet.numRows == 0) {
                 response.write(gson.toJson(Result(success = false, reason = "User bound to this session was removed, this session will be revoked"))).end()
                 try {
@@ -327,14 +329,14 @@ class Server(router: Router, private val database: AsyncSQLClient) {
         // Query all user information (Session.User may contain incomplete data)
         database.queryWithParams("SELECT Username, FirstName, LastName, Student FROM Users WHERE ID = ? LIMIT 1", json {
             array(session.user.id.toString())
-        }) { result ->
-            if(!result.succeeded()) {
-                val cause = result.cause()
+        }) {
+            if(!it.succeeded()) {
+                val cause = it.cause()
                 logger.error { cause.localizedMessage }
                 response.write(gson.toJson(Result(success = false, reason = "Internal server error"))).end()
                 return@queryWithParams
             }
-            val resultSet = result.result()
+            val resultSet = it.result()
             if(resultSet.numRows == 0) {
                 response.write(gson.toJson(Result(success = false, reason = "User bound to this session was removed, this session will be revoked"))).end()
                 try {
@@ -366,7 +368,7 @@ class Server(router: Router, private val database: AsyncSQLClient) {
                     array(user.firstName, user.lastName, user.username, user.id)
             }) { res ->
                 if(!res.succeeded()) {
-                    val cause = result.cause()
+                    val cause = it.cause()
                     logger.error { cause.localizedMessage }
                     response.write(gson.toJson(Result(success = false, reason = "Internal server error"))).end()
                     return@updateWithParams
@@ -394,15 +396,15 @@ class Server(router: Router, private val database: AsyncSQLClient) {
 
         database.queryWithParams("SELECT Student FROM Users WHERE ID = ? LIMIT 1", json {
             array(session.user.id.toString())
-        }) { result ->
-            if(!result.succeeded()) {
-                val cause = result.cause()
+        }) {
+            if(!it.succeeded()) {
+                val cause = it.cause()
                 logger.error { cause.localizedMessage }
                 response.write(gson.toJson(Result(success = false, reason = "Internal server error"))).end()
                 return@queryWithParams
             }
 
-            val resultSet = result.result()
+            val resultSet = it.result()
             if(resultSet.numRows == 0) {
                 response.write(gson.toJson(Result(success = false, reason = "User bound to this session was removed, session will be revoked"))).end()
                 try {
@@ -515,6 +517,134 @@ class Server(router: Router, private val database: AsyncSQLClient) {
                             ))
                         }
                         response.write(gson.toJson(Result(success = true, users = list.toTypedArray()))).end()
+                    }
+                }
+            }
+        }
+    }
+
+    // POST /user method implementation
+    private fun postUser(ctx: RoutingContext) {
+        val response = ctx.response()
+        val gson = gsonBuilder.create()
+
+        val uuid = ctx.request().getParam("uuid")
+        if(uuid == null) {
+            response.write(gson.toJson(Result(success = false, reason = "Missing `uuid`"))).end()
+            return
+        }
+        val session = checkSession(uuid)
+        if(session == null) {
+            response.write(gson.toJson(Result(success = false, reason = "Invalid session"))).end()
+            return
+        }
+
+        val body = try {
+            ctx.bodyAsJson
+        } catch(e: Exception) {
+            response.write(gson.toJson(Result(success = false, reason = "Body should be valid JSON"))).end()
+            return
+        }
+
+        database.queryWithParams("SELECT Student FROM Users WHERE ID = ? LIMIT 1", json {
+            array(session.user.id)
+        }) {
+            if(!it.succeeded()) {
+                val cause = it.cause()
+                logger.error { cause.localizedMessage }
+                response.write(gson.toJson(Result(success = false, reason = "Internal server error"))).end()
+                return@queryWithParams
+            }
+
+            val resultSet = it.result()
+            if(resultSet.numRows == 0) {
+                response.write(gson.toJson(Result(success = false, reason = "User bound to this session was removed, session will be revoked"))).end()
+                try {
+                    ServerState.revokeSession(SessionIdentifier(UUID.fromString(uuid)))
+                } catch(e: Exception) {
+                    // In case of exception, do nothing.
+                }
+                return@queryWithParams
+            }
+
+            val row = resultSet.rows[0]
+            if(row.getBoolean("student", false)) {
+                response.write(gson.toJson(Result(success = false, reason = "Students are not allowed to use this method"))).end()
+                return@queryWithParams
+            }
+
+            val id = body.getString("id")
+            val user = body.getJsonObject("user")
+            if(user == null) {
+                response.write(gson.toJson(Result(success = false, reason = "Missing `user`"))).end()
+                return@queryWithParams
+            }
+            when(id) {
+                // Create
+                null -> {
+                    val userClass = gson.fromJson(user.encode(), User::class.java)
+                    if(userClass.hasNulls()) {
+                        response.write(gson.toJson(Result(success = false, reason = "`user` should have all fields present"))).end()
+                        return@queryWithParams
+                    }
+                    userClass.id = UUID.randomUUID()
+                    database.updateWithParams("INSERT INTO Users (ID, FirstName, LastName, Username, Password, Student) VALUES (?, ?, ?, ?, ?, ?)",
+                            json {
+                                array(userClass.id.toString(), userClass.firstName, userClass.lastName, userClass.username, BCrypt.hashpw(userClass.password, BCrypt.gensalt(10)), userClass.student)
+                            }) { res ->
+                        if(!res.succeeded()) {
+                            val cause = res.cause()
+                            logger.error { cause.localizedMessage }
+                            response.write(gson.toJson(Result(success = false, reason = "Cannot add user (duplicate username or internal server error)"))).end()
+                            return@updateWithParams
+                        }
+                        response.write(gson.toJson(Result(success = true, uuid = userClass.id.toString()))).end()
+                    }
+                }
+                // Update
+                else -> {
+                    try {
+                        UUID.fromString(id)
+                    } catch(e: Exception) {
+                        response.write(gson.toJson(Result(success = false, reason = "Invalid `uuid`"))).end()
+                        return@queryWithParams
+                    }
+                    val userClass = gson.fromJson(user.encode(), User::class.java)
+                    database.queryWithParams("SELECT FirstName, LastName, Username, Password, Student FROM Users WHERE ID = ?", json {
+                        array(id)
+                    }) query@{ res ->
+                        if(!res.succeeded()) {
+                            val cause = res.cause()
+                            logger.error { cause.localizedMessage }
+                            response.write(gson.toJson(Result(success = false, reason = "Internal server error"))).end()
+                            return@query
+                        }
+                        val result = res.result()
+                        if(result.numRows == 0) {
+                            response.write(gson.toJson(Result(success = false, reason = "No such user found"))).end()
+                            return@query
+                        }
+                        val userRow = result.rows[0]
+                        val firstName = userRow.getString("firstname")
+                        val lastName = userRow.getString("lastname")
+                        val username = userRow.getString("username")
+                        val password = userRow.getString("password")
+                        val student = userRow.getBoolean("student")
+                        if(userClass.password != null) {
+                            userClass.password = BCrypt.hashpw(userClass.password, BCrypt.gensalt(10))
+                        }
+                        database.updateWithParams("UPDATE Users SET FirstName = ?, LastName = ?, Username = ?, Password = ?, Student = ? WHERE ID = ?",
+                                json {
+                                    array(userClass.firstName ?: firstName, userClass.lastName ?: lastName, userClass.username ?: username, userClass.password ?: password, userClass.student ?: student, id)
+                                }) { _res ->
+                            if(!_res.succeeded()) {
+                                val cause = _res.cause()
+                                logger.error { cause.localizedMessage }
+                                response.write(gson.toJson(Result(success = false, reason = "Cannot update user (duplicate username or internal server error)"))).end()
+                                return@updateWithParams
+                            }
+                            response.write(gson.toJson(Result(success = true))).end()
+                        }
                     }
                 }
             }
